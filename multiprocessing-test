@@ -1,0 +1,101 @@
+此文转自：http://www.redicecn.com/html/Python/20111223/355.html
+特别说明：
+需要自己在linux上下载并安装python的pprocess模块。方法如下：
+下载：wget http://www.boddie.org.uk/python/downloads/pprocess-0.5.tar.gz
+安装：PYTHONPATH=. python setup.py install
+（其他可参考：README.txt）
+测试是否能用：
+Python串行运算.并行运算.多线程.多进程对比实验
+没有弹出错误，说明能用了。
+接下来我们看看原博文：
+Python发挥不了多核处理器的性能（据说是受限于GIL，被锁住只能用一个CPU核心，关于这个，这里有篇文章），但是可以通过Python的multiprocessing（多进程）模块或者并行运算模块（例如，pprocess）来使用到多核。
+测试代码如下，程序先后分别测试了串行运算、并行运算以及多线程和多进程执行同一个函数所花费的时间。
+
+----------------------------------------------------------------------------------------------------------------
+
+#! /usr/local/bin/python2.7
+# test.py
+import time
+import pprocess # 该模块只能在linux下使用
+import threading
+from multiprocessing import Process
+def takeuptime(n):
+chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+s = chars * 1000
+for i in range(10*n):
+for c in chars:
+s.count(c)
+if __name__ == '__main__':
+list_of_args = [1000, 1000, 1000, 1000]
+# Serial computation
+start = time.time()
+serial_results = [takeuptime(args) for args in list_of_args]
+print "%f s for traditional, serial computation." % (time.time() - start)
+# Parallel computation
+nproc = 4 # maximum number of simultaneous processes desired
+results = pprocess.Map(limit=nproc, reuse=1)
+parallel_function = results.manage(pprocess.MakeReusable(takeuptime))
+start = time.time()
+# Start computing things
+for args in list_of_args:
+parallel_function(args)
+parallel_results = results[:]
+print "%f s for parallel computation." % (time.time() - start)
+# Multithreading computation
+nthead = 4 # number of threads
+threads = [threading.Thread(target=takeuptime, args=(list_of_args[i],)) for i in range(nthead)]
+start = time.time()
+# Start threads one by one
+for thread in threads:
+thread.start()
+# Wait for all threads to finish
+for thread in threads:
+thread.join()
+print "%f s for multithreading computation." % (time.time() - start)
+# Multiprocessing computation
+process = []
+nprocess = 4 # number of processes
+for i in range(nprocess):
+process.append(Process(target=takeuptime, args=(list_of_args[i],)))
+start = time.time()
+# Start processes one by one
+for p in process:
+p.start()
+# Wait for all processed to finish
+for i in process:
+p.join()
+print "%f s for multiprocessing computation." % (time.time() - start)
+
+
+----------------------------------------------------------------------------------------------------------------
+
+运行结果如下：
+[root@localhost test]# python test.py
+62.452934 s for traditional, serial computation.
+20.665276 s for parallel computation.
+64.835923 s for multithreading computation.
+18.392281 s for multiprocessing computation.
+
+
+
+从测试结果可以明显看出并行运算和多进程计算速度明显要快于串行计算和多线程计算。
+这里有个问题，为什么多线程的所花的时间不比串行单线程的少呢（64.873760 > 62.452934）？
+根据我们的常规经验，多线程肯定要比单线程要快，为什么测试结果却不是这样呢？
+前面已经提到了，Python只能用到一个CPU核心，因此即便是多线程，在同一时间CPU也只能处理一个线程运算，多个线程并不能并行的运行，他们是轮流切换执行的。
+因此，只有当线程中会出现阻塞时，多线程才有意义，比如线程中有数据下载，在等待数据返回时线程阻塞了，此时CPU就可以来处理其它线程的运算。
+上面测试程序中的takeuptime()函数没有阻塞，它不停地在进行着运算，所以多线程和单线程的效果是一样的（线程切换也会花费时间，所以此时多线程花费的时候甚至比单线程多一些）。
+并行运算和多进程运算之所以快，就是因为他们能同时利用多个CPU核心，多个数据运算能同时进行。
+我们把takeuptime()函数改成有阻塞的，再测试一下：
+def takeuptime(n):
+def download(url):
+# simulate downloading
+time.sleep(2)
+for i in range(5):
+html = download('http://www.redicecn.com/page%d.html' % i)
+新的运行结果如下：
+[root@localhost test]# python test.py
+39.996438 s for traditional, serial computation.
+10.003863 s for parallel computation.
+10.003480 s for multithreading computation.
+10.008936 s for multiprocessing computation.
+可以看到在有阻塞的数据处理过程中，多线程的作用还是很明显的。
